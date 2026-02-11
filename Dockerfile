@@ -9,7 +9,6 @@ RUN pip install --no-cache-dir .
 RUN mkdir -p /app/data
 
 ENV DATA_DIR=/app/data \
-    OLLAMA_URL=http://seeclickfix-ollama:11434 \
     WEB_HOST=0.0.0.0 \
     WEB_PORT=8000
 
