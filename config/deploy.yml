@@ -1,0 +1,37 @@
+service: seeclickfix
+image: aosik/seeclickfix-sentiment
+
+servers:
+  web:
+    hosts:
+      - 89.167.56.225
+
+registry:
+  username: aosik
+  password:
+    - KAMAL_REGISTRY_PASSWORD
+
+env:
+  clear:
+    OLLAMA_URL: http://seeclickfix-ollama:11434
+    DATA_DIR: /app/data
+    PIPELINE_START_DATE: "2015-01-01"
+
+volumes:
+  - seeclickfix_data:/app/data
+
+proxy:
+  ssl: true
+  host: seeclickfixsentiment.hackjc.org
+  app_port: 8000
+
+accessories:
+  ollama:
+    image: ollama/ollama:latest
+    host: 89.167.56.225
+    port: "11434:11434"
+    volumes:
+      - ollama_models:/root/.ollama
+    cmd: serve
+    options:
+      memory: 8g

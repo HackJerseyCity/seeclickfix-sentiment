@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import sqlite3
-from pathlib import Path
 
-DATA_DIR = Path(__file__).parent.parent.parent / "data"
-DB_PATH = DATA_DIR / "seeclickfix.db"
+from src.config import DATA_DIR, DB_PATH
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS issues (
@@ -75,6 +73,10 @@ CREATE TABLE IF NOT EXISTS issue_sentiment (
     resolved_label TEXT,
     resolved_confidence REAL,
     resolved_by TEXT,
+    llm_reasoning TEXT,
+    outcome_label TEXT,
+    outcome_confidence REAL,
+    outcome_reasoning TEXT,
     FOREIGN KEY (issue_id) REFERENCES issues(id)
 );
 
@@ -91,6 +93,10 @@ CREATE TABLE IF NOT EXISTS employee_sentiment_summary (
     avg_roberta_negative REAL,
     positive_pct REAL,
     negative_pct REAL,
+    outcome_positive_count INTEGER DEFAULT 0,
+    outcome_negative_count INTEGER DEFAULT 0,
+    outcome_positive_pct REAL,
+    outcome_negative_pct REAL,
     FOREIGN KEY (employee_id) REFERENCES employees(id)
 );
 
@@ -105,6 +111,10 @@ CREATE TABLE IF NOT EXISTS department_sentiment_summary (
     avg_vader_compound REAL,
     positive_pct REAL,
     negative_pct REAL,
+    outcome_positive_count INTEGER DEFAULT 0,
+    outcome_negative_count INTEGER DEFAULT 0,
+    outcome_positive_pct REAL,
+    outcome_negative_pct REAL,
     FOREIGN KEY (department_id) REFERENCES departments(id)
 );
 
@@ -145,6 +155,36 @@ def _migrate(conn: sqlite3.Connection) -> None:
     cols = {row[1] for row in conn.execute("PRAGMA table_info(issue_sentiment)").fetchall()}
     if cols and "resident_comment_count" not in cols:
         conn.execute("ALTER TABLE issue_sentiment ADD COLUMN resident_comment_count INTEGER DEFAULT 0")
+        conn.commit()
+
+    # Add llm_reasoning to issue_sentiment if missing
+    if cols and "llm_reasoning" not in cols:
+        conn.execute("ALTER TABLE issue_sentiment ADD COLUMN llm_reasoning TEXT")
+        conn.commit()
+
+    # Add outcome columns to issue_sentiment if missing
+    if cols and "outcome_label" not in cols:
+        conn.execute("ALTER TABLE issue_sentiment ADD COLUMN outcome_label TEXT")
+        conn.execute("ALTER TABLE issue_sentiment ADD COLUMN outcome_confidence REAL")
+        conn.execute("ALTER TABLE issue_sentiment ADD COLUMN outcome_reasoning TEXT")
+        conn.commit()
+
+    # Add outcome aggregate columns to employee_sentiment_summary if missing
+    emp_cols = {row[1] for row in conn.execute("PRAGMA table_info(employee_sentiment_summary)").fetchall()}
+    if emp_cols and "outcome_positive_count" not in emp_cols:
+        conn.execute("ALTER TABLE employee_sentiment_summary ADD COLUMN outcome_positive_count INTEGER DEFAULT 0")
+        conn.execute("ALTER TABLE employee_sentiment_summary ADD COLUMN outcome_negative_count INTEGER DEFAULT 0")
+        conn.execute("ALTER TABLE employee_sentiment_summary ADD COLUMN outcome_positive_pct REAL")
+        conn.execute("ALTER TABLE employee_sentiment_summary ADD COLUMN outcome_negative_pct REAL")
+        conn.commit()
+
+    # Add outcome aggregate columns to department_sentiment_summary if missing
+    dept_cols = {row[1] for row in conn.execute("PRAGMA table_info(department_sentiment_summary)").fetchall()}
+    if dept_cols and "outcome_positive_count" not in dept_cols:
+        conn.execute("ALTER TABLE department_sentiment_summary ADD COLUMN outcome_positive_count INTEGER DEFAULT 0")
+        conn.execute("ALTER TABLE department_sentiment_summary ADD COLUMN outcome_negative_count INTEGER DEFAULT 0")
+        conn.execute("ALTER TABLE department_sentiment_summary ADD COLUMN outcome_positive_pct REAL")
+        conn.execute("ALTER TABLE department_sentiment_summary ADD COLUMN outcome_negative_pct REAL")
         conn.commit()
 
 

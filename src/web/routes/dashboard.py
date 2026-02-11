@@ -62,7 +62,8 @@ async def dashboard(request: Request):
     dept_rankings = conn.execute(
         """SELECT d.id, d.name, d.employee_count,
                   s.analyzed_comments, s.positive_pct, s.negative_pct,
-                  s.avg_vader_compound
+                  s.avg_vader_compound,
+                  s.outcome_positive_pct, s.outcome_negative_pct
            FROM department_sentiment_summary s
            JOIN departments d ON d.id = s.department_id
            WHERE s.analyzed_comments >= 5

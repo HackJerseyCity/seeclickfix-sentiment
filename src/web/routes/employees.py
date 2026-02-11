@@ -37,7 +37,8 @@ async def list_employees(
                    s.analyzed_comments, s.total_comments,
                    s.positive_count, s.negative_count, s.neutral_count, s.mixed_count,
                    s.positive_pct, s.negative_pct,
-                   s.avg_vader_compound
+                   s.avg_vader_compound,
+                   s.outcome_positive_pct, s.outcome_negative_pct
             FROM employees e
             LEFT JOIN departments d ON d.id = e.department_id
             LEFT JOIN employee_sentiment_summary s ON s.employee_id = e.id
@@ -84,7 +85,8 @@ async def employee_detail(request: Request, employee_id: int):
     issues = conn.execute(
         """SELECT DISTINCT i.id, i.summary, i.status, i.created_at, i.html_url,
                   i.request_type, i.address,
-                  isent.resolved_label, isent.resolved_confidence
+                  isent.resolved_label, isent.resolved_confidence,
+                  isent.outcome_label, isent.outcome_confidence
            FROM issues i
            JOIN comments c ON c.issue_id = i.id
            LEFT JOIN issue_sentiment isent ON isent.issue_id = i.id

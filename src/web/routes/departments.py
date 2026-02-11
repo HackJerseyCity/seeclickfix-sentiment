@@ -21,7 +21,8 @@ async def list_departments(request: Request):
                   s.analyzed_comments, s.total_comments,
                   s.positive_count, s.negative_count, s.neutral_count, s.mixed_count,
                   s.positive_pct, s.negative_pct,
-                  s.avg_vader_compound
+                  s.avg_vader_compound,
+                  s.outcome_positive_pct, s.outcome_negative_pct
            FROM departments d
            LEFT JOIN department_sentiment_summary s ON s.department_id = d.id
            ORDER BY d.name"""
@@ -61,7 +62,8 @@ async def department_detail(request: Request, department_id: int):
     employees = conn.execute(
         """SELECT e.id, e.name_parsed, e.name_raw, e.title_parsed,
                   s.analyzed_comments, s.positive_pct, s.negative_pct,
-                  s.avg_vader_compound
+                  s.avg_vader_compound,
+                  s.outcome_positive_pct, s.outcome_negative_pct
            FROM employees e
            LEFT JOIN employee_sentiment_summary s ON s.employee_id = e.id
            WHERE e.department_id = ?
@@ -73,7 +75,8 @@ async def department_detail(request: Request, department_id: int):
     recent_issues = conn.execute(
         """SELECT DISTINCT i.id, i.summary, i.status, i.created_at,
                   i.html_url, i.address, i.request_type,
-                  isent.resolved_label, isent.resolved_confidence
+                  isent.resolved_label, isent.resolved_confidence,
+                  isent.outcome_label, isent.outcome_confidence
            FROM issues i
            JOIN comments c ON c.issue_id = i.id
            JOIN employees e ON e.commenter_id = c.commenter_id

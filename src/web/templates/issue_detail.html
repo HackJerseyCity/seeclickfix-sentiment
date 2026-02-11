@@ -26,21 +26,37 @@
 {% if issue.sentiment_label %}
 <div class="conversation-sentiment" style="margin: var(--space-6) 0;">
     <h3 style="margin-bottom: var(--space-2);">Conversation Sentiment</h3>
-    {% if issue.sentiment_by == 'no-resident' %}
-    <div>
-        <span style="font-size: var(--text-sm); color: var(--gray-400); font-style: italic;">
-            No resident feedback &mdash; employee-only thread
-        </span>
-    </div>
-    {% else %}
-    <div>
+
+    <div style="margin-bottom: var(--space-3);">
+        <div style="font-size: var(--text-sm); color: var(--gray-400); margin-bottom: var(--space-1);">Interaction</div>
         <span class="sentiment sentiment-{{ issue.sentiment_label }}">
             {{ issue.sentiment_label }} {{ "%.0f"|format(issue.sentiment_confidence * 100) }}%
         </span>
-        <span style="font-size: var(--text-xs); color: var(--gray-400); margin-left: var(--space-2);">
-            via {{ issue.sentiment_by }}{% if issue.sentiment_vader is not none %} &middot; VADER {{ "%.2f"|format(issue.sentiment_vader) }}{% endif %} &middot; {{ issue.sentiment_comments }} comments analyzed
+        {% if issue.sentiment_reasoning %}
+        <span style="font-size: var(--text-sm); color: var(--gray-400); font-style: italic; margin-left: var(--space-2);">
+            &ldquo;{{ issue.sentiment_reasoning }}&rdquo;
         </span>
+        {% endif %}
     </div>
+
+    {% if issue.outcome_label %}
+    <div style="margin-bottom: var(--space-3);">
+        <div style="font-size: var(--text-sm); color: var(--gray-400); margin-bottom: var(--space-1);">Outcome</div>
+        <span class="sentiment sentiment-{{ issue.outcome_label }}">
+            {{ issue.outcome_label }} {{ "%.0f"|format(issue.outcome_confidence * 100) }}%
+        </span>
+        {% if issue.outcome_reasoning %}
+        <span style="font-size: var(--text-sm); color: var(--gray-400); font-style: italic; margin-left: var(--space-2);">
+            &ldquo;{{ issue.outcome_reasoning }}&rdquo;
+        </span>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    <div style="font-size: var(--text-xs); color: var(--gray-400);">
+        {{ issue.sentiment_comments }} comments analyzed
+    </div>
+
     {% set pos = 0 %}{% set neg = 0 %}{% set neu = 100 %}
     {% if issue.sentiment_label == 'positive' %}{% set pos = (issue.sentiment_confidence * 100)|int %}{% set neu = 100 - pos %}
     {% elif issue.sentiment_label == 'negative' %}{% set neg = (issue.sentiment_confidence * 100)|int %}{% set neu = 100 - neg %}
@@ -51,7 +67,6 @@
         {% if neu > 0 %}<div class="segment segment-neutral" style="width:{{ neu }}%"></div>{% endif %}
         {% if neg > 0 %}<div class="segment segment-negative" style="width:{{ neg }}%"></div>{% endif %}
     </div>
-    {% endif %}
 </div>
 {% endif %}
 

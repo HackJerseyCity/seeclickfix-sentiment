@@ -18,26 +18,45 @@
     </div>
     <div class="stat">
         <span class="stat-value positive">{{ "%.0f"|format(summary.positive_pct or 0) }}%</span>
-        <span class="stat-label">Positive</span>
+        <span class="stat-label">Int. Positive</span>
     </div>
     <div class="stat">
         <span class="stat-value negative">{{ "%.0f"|format(summary.negative_pct or 0) }}%</span>
-        <span class="stat-label">Negative</span>
+        <span class="stat-label">Int. Negative</span>
+    </div>
+    <div class="stat">
+        <span class="stat-value positive">{{ "%.0f"|format(summary.outcome_positive_pct or 0) }}%</span>
+        <span class="stat-label">Out. Positive</span>
+    </div>
+    <div class="stat">
+        <span class="stat-value negative">{{ "%.0f"|format(summary.outcome_negative_pct or 0) }}%</span>
+        <span class="stat-label">Out. Negative</span>
     </div>
 </div>
 
-{% set pos = summary.positive_pct or 0 %}
-{% set neg = summary.negative_pct or 0 %}
-{% set neu = 100 - pos - neg %}
-<div class="sentiment-bar sentiment-bar-lg">
-    {% if pos > 0 %}<div class="segment segment-positive" style="width:{{ pos }}%"></div>{% endif %}
-    {% if neu > 0 %}<div class="segment segment-neutral" style="width:{{ neu }}%"></div>{% endif %}
-    {% if neg > 0 %}<div class="segment segment-negative" style="width:{{ neg }}%"></div>{% endif %}
-</div>
-<div class="bar-legend">
-    <span class="sentiment sentiment-positive">{{ "%.0f"|format(pos) }}% positive</span>
-    <span class="sentiment sentiment-neutral">{{ "%.0f"|format(neu) }}% neutral</span>
-    <span class="sentiment sentiment-negative">{{ "%.0f"|format(neg) }}% negative</span>
+<div style="display: flex; gap: var(--space-8); flex-wrap: wrap; margin-bottom: var(--space-6);">
+    <div style="flex: 1; min-width: 200px;">
+        <div style="font-size: var(--text-xs); color: var(--gray-400); margin-bottom: var(--space-1);">Interaction</div>
+        {% set pos = summary.positive_pct or 0 %}
+        {% set neg = summary.negative_pct or 0 %}
+        {% set neu = 100 - pos - neg %}
+        <div class="sentiment-bar sentiment-bar-lg">
+            {% if pos > 0 %}<div class="segment segment-positive" style="width:{{ pos }}%"></div>{% endif %}
+            {% if neu > 0 %}<div class="segment segment-neutral" style="width:{{ neu }}%"></div>{% endif %}
+            {% if neg > 0 %}<div class="segment segment-negative" style="width:{{ neg }}%"></div>{% endif %}
+        </div>
+    </div>
+    <div style="flex: 1; min-width: 200px;">
+        <div style="font-size: var(--text-xs); color: var(--gray-400); margin-bottom: var(--space-1);">Outcome</div>
+        {% set opos = summary.outcome_positive_pct or 0 %}
+        {% set oneg = summary.outcome_negative_pct or 0 %}
+        {% set oneu = 100 - opos - oneg %}
+        <div class="sentiment-bar sentiment-bar-lg">
+            {% if opos > 0 %}<div class="segment segment-positive" style="width:{{ opos }}%"></div>{% endif %}
+            {% if oneu > 0 %}<div class="segment segment-neutral" style="width:{{ oneu }}%"></div>{% endif %}
+            {% if oneg > 0 %}<div class="segment segment-negative" style="width:{{ oneg }}%"></div>{% endif %}
+        </div>
+    </div>
 </div>
 {% endif %}
 
@@ -50,9 +69,10 @@
                 <th>Name</th>
                 <th>Title</th>
                 <th class="text-right">Issues</th>
-                <th class="text-right">Positive</th>
-                <th class="text-right">Negative</th>
-                <th class="text-right">Score</th>
+                <th class="text-right">Int. +</th>
+                <th class="text-right">Int. &minus;</th>
+                <th class="text-right">Out. +</th>
+                <th class="text-right">Out. &minus;</th>
             </tr>
         </thead>
         <tbody>
@@ -72,8 +92,13 @@
                     {% else %}<span class="text-muted">-</span>{% endif %}
                 </td>
                 <td class="text-right">
-                    {% if e.avg_vader_compound is not none %}
-                    {{ "%.2f"|format(e.avg_vader_compound) }}
+                    {% if e.outcome_positive_pct is not none %}
+                    <span class="text-positive">{{ "%.0f"|format(e.outcome_positive_pct) }}%</span>
+                    {% else %}<span class="text-muted">-</span>{% endif %}
+                </td>
+                <td class="text-right">
+                    {% if e.outcome_negative_pct is not none %}
+                    <span class="text-negative">{{ "%.0f"|format(e.outcome_negative_pct) }}%</span>
                     {% else %}<span class="text-muted">-</span>{% endif %}
                 </td>
             </tr>
@@ -93,7 +118,8 @@
             <tr>
                 <th>Issue</th>
                 <th>Type</th>
-                <th>Sentiment</th>
+                <th>Interaction</th>
+                <th>Outcome</th>
                 <th>Status</th>
                 <th>Date</th>
                 <th></th>
@@ -105,6 +131,7 @@
                 <td class="truncate"><a href="/issues/{{ i.id }}">{{ i.summary }}</a></td>
                 <td class="text-muted">{{ i.request_type or '-' }}</td>
                 <td>{% if i.resolved_label %}<span class="sentiment sentiment-{{ i.resolved_label }}">{{ i.resolved_label }}</span>{% else %}<span class="text-muted">-</span>{% endif %}</td>
+                <td>{% if i.outcome_label %}<span class="sentiment sentiment-{{ i.outcome_label }}">{{ i.outcome_label }}</span>{% else %}<span class="text-muted">-</span>{% endif %}</td>
                 <td><span class="status">{{ i.status }}</span></td>
                 <td class="text-muted">{{ i.created_at[:10] if i.created_at else '' }}</td>
                 <td>{% if i.html_url %}<a href="{{ i.html_url }}" target="_blank" rel="noopener" class="external">SCF</a>{% endif %}</td>

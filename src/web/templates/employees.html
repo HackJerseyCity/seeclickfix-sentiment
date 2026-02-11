@@ -22,10 +22,11 @@
             <th>Title</th>
             <th>{{ sort_header('dept', 'Department') }}</th>
             <th class="text-right">{{ sort_header('comments', 'Issues') }}</th>
-            <th class="text-right">{{ sort_header('positive_pct', 'Positive') }}</th>
-            <th class="text-right">{{ sort_header('negative_pct', 'Negative') }}</th>
-            <th class="text-right">{{ sort_header('avg_sentiment', 'Score') }}</th>
-            <th>Distribution</th>
+            <th class="text-right">{{ sort_header('positive_pct', 'Int. +') }}</th>
+            <th class="text-right">{{ sort_header('negative_pct', 'Int. &minus;') }}</th>
+            <th class="text-right">Out. +</th>
+            <th class="text-right">Out. &minus;</th>
+            <th>Interaction</th>
         </tr>
     </thead>
     <tbody>
@@ -52,8 +53,13 @@
                 {% else %}<span class="text-muted">-</span>{% endif %}
             </td>
             <td class="text-right">
-                {% if e.avg_vader_compound is not none %}
-                {{ "%.2f"|format(e.avg_vader_compound) }}
+                {% if e.outcome_positive_pct is not none %}
+                <span class="text-positive">{{ "%.0f"|format(e.outcome_positive_pct) }}%</span>
+                {% else %}<span class="text-muted">-</span>{% endif %}
+            </td>
+            <td class="text-right">
+                {% if e.outcome_negative_pct is not none %}
+                <span class="text-negative">{{ "%.0f"|format(e.outcome_negative_pct) }}%</span>
                 {% else %}<span class="text-muted">-</span>{% endif %}
             </td>
             <td style="min-width: 100px;">

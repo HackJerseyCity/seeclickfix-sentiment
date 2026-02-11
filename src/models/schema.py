@@ -129,6 +129,10 @@ class IssueSentiment(BaseModel):
     resolved_label: SentimentLabel = SentimentLabel.NEUTRAL
     resolved_confidence: float = 0.0
     resolved_by: str = "vader"
+    llm_reasoning: Optional[str] = None
+    outcome_label: Optional[str] = None
+    outcome_confidence: Optional[float] = None
+    outcome_reasoning: Optional[str] = None
 
 
 class EmployeeSentimentSummary(BaseModel):
@@ -144,6 +148,10 @@ class EmployeeSentimentSummary(BaseModel):
     avg_roberta_negative: Optional[float] = None
     positive_pct: Optional[float] = None
     negative_pct: Optional[float] = None
+    outcome_positive_count: int = 0
+    outcome_negative_count: int = 0
+    outcome_positive_pct: Optional[float] = None
+    outcome_negative_pct: Optional[float] = None
 
 
 class DepartmentSentimentSummary(BaseModel):
@@ -157,3 +165,7 @@ class DepartmentSentimentSummary(BaseModel):
     avg_vader_compound: Optional[float] = None
     positive_pct: Optional[float] = None
     negative_pct: Optional[float] = None
+    outcome_positive_count: int = 0
+    outcome_negative_count: int = 0
+    outcome_positive_pct: Optional[float] = None
+    outcome_negative_pct: Optional[float] = None

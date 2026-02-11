@@ -13,9 +13,11 @@
             <th>Department</th>
             <th class="text-right">Employees</th>
             <th class="text-right">Issues</th>
-            <th class="text-right">Positive</th>
-            <th class="text-right">Negative</th>
-            <th>Distribution</th>
+            <th class="text-right">Int. +</th>
+            <th class="text-right">Int. &minus;</th>
+            <th class="text-right">Out. +</th>
+            <th class="text-right">Out. &minus;</th>
+            <th>Interaction</th>
         </tr>
     </thead>
     <tbody>
@@ -32,6 +34,16 @@
             <td class="text-right">
                 {% if d.negative_pct is not none %}
                 <span class="text-negative">{{ "%.0f"|format(d.negative_pct) }}%</span>
+                {% else %}<span class="text-muted">-</span>{% endif %}
+            </td>
+            <td class="text-right">
+                {% if d.outcome_positive_pct is not none %}
+                <span class="text-positive">{{ "%.0f"|format(d.outcome_positive_pct) }}%</span>
+                {% else %}<span class="text-muted">-</span>{% endif %}
+            </td>
+            <td class="text-right">
+                {% if d.outcome_negative_pct is not none %}
+                <span class="text-negative">{{ "%.0f"|format(d.outcome_negative_pct) }}%</span>
                 {% else %}<span class="text-muted">-</span>{% endif %}
             </td>
             <td style="min-width: 120px;">

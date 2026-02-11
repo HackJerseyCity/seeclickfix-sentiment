@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block title %}Analyzed Issues - SeeClickFix Sentiment{% endblock %}
+
+{% macro sort_header(col, lbl) %}
+{% set new_order = 'asc' if (sort == col and order == 'desc') else 'desc' %}
+<a class="sort-link {% if sort == col %}active{% endif %}"
+   href="/issues?sort={{ col }}&order={{ new_order }}{% if label %}&label={{ label }}{% endif %}{% if outcome %}&outcome={{ outcome }}{% endif %}">
+    {{ lbl }}{% if sort == col %}{{ ' &#9650;' if order == 'asc' else ' &#9660;' }}{% endif %}
+</a>
+{% endmacro %}
+
+{% macro filter_pill(param_name, value, count, current) %}
+{% if current == value %}
+<a href="/issues?sort={{ sort }}&order={{ order }}" class="filter-pill active">{{ value }} <span class="pill-count">{{ count }}</span></a>
+{% else %}
+<a href="/issues?sort={{ sort }}&order={{ order }}&{{ param_name }}={{ value }}" class="filter-pill">{{ value }} <span class="pill-count">{{ count }}</span></a>
+{% endif %}
+{% endmacro %}
+
+{% block head %}
+<style>
+    .filters { display: flex; gap: var(--space-6); margin-bottom: var(--space-8); flex-wrap: wrap; }
+    .filter-group { display: flex; align-items: center; gap: var(--space-2); }
+    .filter-label { font-size: var(--text-xs); color: var(--gray-400); text-transform: uppercase; letter-spacing: 0.05em; margin-right: var(--space-1); }
+    .filter-pill {
+        display: inline-flex; align-items: center; gap: var(--space-1);
+        font-size: var(--text-xs); padding: var(--space-1) var(--space-3);
+        border: 1px solid var(--gray-200); border-radius: 999px;
+        color: var(--gray-600); text-transform: capitalize;
+        transition: all var(--duration) var(--ease-out);
+    }
+    .filter-pill:hover { border-color: var(--gray-400); color: var(--gray-900); }
+    .filter-pill.active { background: var(--gray-900); color: white; border-color: var(--gray-900); }
+    .filter-pill.active:hover { color: white; }
+    .pill-count { color: var(--gray-400); font-weight: 400; }
+    .filter-pill.active .pill-count { color: var(--gray-400); }
+    .issue-summary { max-width: 400px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Analyzed Issues</h1>
+    <div class="page-subtitle">{{ total }} issues analyzed by LLM</div>
+</div>
+
+<div class="filters">
+    <div class="filter-group">
+        <span class="filter-label">Interaction</span>
+        {% for lbl in ['positive', 'negative', 'neutral', 'mixed'] %}
+            {% if lbl in label_counts %}
+                {{ filter_pill('label', lbl, label_counts[lbl], label) }}
+            {% endif %}
+        {% endfor %}
+    </div>
+    <div class="filter-group">
+        <span class="filter-label">Outcome</span>
+        {% for lbl in ['positive', 'negative', 'neutral', 'mixed'] %}
+            {% if lbl in outcome_counts %}
+                {{ filter_pill('outcome', lbl, outcome_counts[lbl], outcome) }}
+            {% endif %}
+        {% endfor %}
+    </div>
+</div>
+
+{% if issues %}
+<table>
+    <thead>
+        <tr>
+            <th>{{ sort_header('id', 'ID') }}</th>
+            <th>{{ sort_header('date', 'Date') }}</th>
+            <th>Summary</th>
+            <th>Department</th>
+            <th>{{ sort_header('interaction', 'Interaction') }}</th>
+            <th>{{ sort_header('outcome', 'Outcome') }}</th>
+            <th class="text-right">{{ sort_header('confidence', 'Conf.') }}</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for i in issues %}
+        <tr>
+            <td><a href="/issues/{{ i.id }}">#{{ i.id }}</a></td>
+            <td class="text-muted">{{ i.created_at[:10] if i.created_at else '-' }}</td>
+            <td class="issue-summary"><a href="/issues/{{ i.id }}">{{ i.summary or '-' }}</a></td>
+            <td class="text-muted">{{ i.department or '-' }}</td>
+            <td>
+                <span class="sentiment sentiment-{{ i.sentiment_label }}">{{ i.sentiment_label }}</span>
+            </td>
+            <td>
+                {% if i.outcome_label %}
+                <span class="sentiment sentiment-{{ i.outcome_label }}">{{ i.outcome_label }}</span>
+                {% else %}
+                <span class="text-muted">-</span>
+                {% endif %}
+            </td>
+            <td class="text-right text-muted">{{ "%.0f"|format(i.sentiment_confidence * 100) }}%</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p class="empty">No analyzed issues found{% if label or outcome %} matching this filter{% endif %}. Run the analysis pipeline first.</p>
+{% endif %}
+{% endblock %}

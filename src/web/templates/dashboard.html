@@ -109,9 +109,11 @@
                 <th>Department</th>
                 <th class="text-right">Employees</th>
                 <th class="text-right">Issues</th>
-                <th class="text-right">Positive</th>
-                <th class="text-right">Negative</th>
-                <th>Distribution</th>
+                <th class="text-right">Int. +</th>
+                <th class="text-right">Int. &minus;</th>
+                <th class="text-right">Out. +</th>
+                <th class="text-right">Out. &minus;</th>
+                <th>Interaction</th>
             </tr>
         </thead>
         <tbody>
@@ -122,6 +124,8 @@
                 <td class="text-right text-muted">{{ d.analyzed_comments }}</td>
                 <td class="text-right text-positive">{{ "%.0f"|format(d.positive_pct or 0) }}%</td>
                 <td class="text-right text-negative">{{ "%.0f"|format(d.negative_pct or 0) }}%</td>
+                <td class="text-right text-positive">{{ "%.0f"|format(d.outcome_positive_pct or 0) }}%</td>
+                <td class="text-right text-negative">{{ "%.0f"|format(d.outcome_negative_pct or 0) }}%</td>
                 <td style="min-width: 120px;">
                     {% if d.analyzed_comments and d.analyzed_comments > 0 %}
                     {% set pos = d.positive_pct or 0 %}

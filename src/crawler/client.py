@@ -29,6 +29,9 @@ JC_BOUNDS = {
 }
 
 STATUSES = "open,acknowledged,closed,archived"
+
+# Organizations outside Jersey City that overlap with the bounding box
+EXCLUDED_ORGS = {"Town of Kearny"}
 RATE_LIMIT = 20  # requests per minute
 RATE_WINDOW = 60  # seconds
 
@@ -152,8 +155,8 @@ class SeeClickFixCrawler:
             return []
         return data.get("comments", [])
 
-    def _store_issue(self, conn, issue_data: dict) -> None:
-        """Upsert an issue into the database."""
+    def _store_issue(self, conn, issue_data: dict) -> bool:
+        """Upsert an issue into the database. Returns False if filtered out."""
         request_type = issue_data.get("request_type")
         rt_title = None
         rt_org = None
@@ -162,6 +165,10 @@ class SeeClickFixCrawler:
             rt_org = request_type.get("organization")
         elif isinstance(request_type, str):
             rt_title = request_type
+
+        department = rt_org or rt_title
+        if department in EXCLUDED_ORGS:
+            return False
 
         reporter = issue_data.get("reporter") or {}
         html_url = issue_data.get("html_url") or f"https://seeclickfix.com/issues/{issue_data['id']}"
@@ -186,13 +193,14 @@ class SeeClickFixCrawler:
                 issue_data.get("closed_at"),
                 issue_data.get("acknowledged_at"),
                 rt_title,
-                rt_org or rt_title,
+                department,
                 html_url,
                 issue_data.get("comment_count", 0),
                 reporter.get("id") if isinstance(reporter, dict) else None,
                 reporter.get("name") if isinstance(reporter, dict) else None,
             ),
         )
+        return True
 
     def _store_comments(self, conn, issue_id: int, comments: list[dict]) -> int:
         """Store comments for an issue. Returns count stored."""
@@ -362,7 +370,8 @@ class SeeClickFixCrawler:
                     break
 
                 for issue_data in issues:
-                    self._store_issue(conn, issue_data)
+                    if not self._store_issue(conn, issue_data):
+                        continue
                     total_issues += 1
                     self.stats["issues_fetched"] += 1
 
