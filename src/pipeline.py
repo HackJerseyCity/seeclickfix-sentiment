@@ -9,10 +9,12 @@ import asyncio
 import logging
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from typing import Optional
 
 from src.models.database import get_db, init_db
+from src.config import LLM_CONCURRENCY
 from src.sentiment.llm import analyze_sentiment as llm_analyze, DEFAULT_MODEL
 from src.sentiment.analyzer import build_summaries
 from src.extraction.employees import is_auto_generated, parse_employee_name
@@ -24,9 +26,8 @@ log = logging.getLogger(__name__)
 # Per-issue processing (extract + analyse)
 # ---------------------------------------------------------------------------
 
-def process_issue(conn, issue_id: int, noisy: bool = False) -> bool:
-    """Flag auto-generated comments, extract employees, analyse sentiment
-    for a single issue.  Returns True if sentiment was analysed."""
+def _extract_issue(conn, issue_id: int, noisy: bool = False) -> None:
+    """Flag auto-generated comments and upsert employees for a single issue."""
 
     # 1. Flag auto-generated comments on this issue
     comments = conn.execute(
@@ -121,34 +122,34 @@ def process_issue(conn, issue_id: int, noisy: bool = False) -> bool:
            )"""
     )
 
-    # 3. Analyse sentiment if not already done and issue has official comments
+
+def _prepare_llm_data(conn, issue_id: int, noisy: bool = False) -> dict | None:
+    """Return the data needed for the LLM call, or None if analysis should be skipped."""
+
     already = conn.execute(
         "SELECT 1 FROM issue_sentiment WHERE issue_id = ?", (issue_id,)
     ).fetchone()
+    if already:
+        if noisy:
+            log.info("    sentiment: already analysed")
+        return None
 
     has_official = conn.execute(
         "SELECT 1 FROM comments "
         "WHERE issue_id = ? AND commenter_role = 'Verified Official'",
         (issue_id,),
     ).fetchone()
-
-    if already:
-        if noisy:
-            log.info("    sentiment: already analysed")
-        return False
     if not has_official:
         if noisy:
             log.info("    sentiment: no official comments")
-        return False
+        return None
 
-    # Get issue summary and status
     issue_row = conn.execute(
         "SELECT summary, status FROM issues WHERE id = ?", (issue_id,)
     ).fetchone()
     issue_summary = (issue_row["summary"] or "") if issue_row else ""
     issue_status = (issue_row["status"] or "") if issue_row else ""
 
-    # Get ALL comments with metadata for LLM
     all_comments = conn.execute(
         """SELECT comment, created_at, commenter_name,
                   commenter_role, is_auto_generated
@@ -161,21 +162,26 @@ def process_issue(conn, issue_id: int, noisy: bool = False) -> bool:
     if not all_comments:
         if noisy:
             log.info("    sentiment: no analysable text")
-        return False
+        return None
 
-    total_comments = len(all_comments)
     comment_dicts = [dict(c) for c in all_comments]
 
-    # Count resident comments (metadata)
-    resident_comment_count = sum(
-        1 for c in comment_dicts
-        if not c["is_auto_generated"]
-        and c.get("commenter_role") != "Verified Official"
-    )
+    return {
+        "issue_id": issue_id,
+        "summary": issue_summary,
+        "status": issue_status,
+        "comments": comment_dicts,
+        "total_comments": len(all_comments),
+        "resident_comment_count": sum(
+            1 for c in comment_dicts
+            if not c["is_auto_generated"]
+            and c.get("commenter_role") != "Verified Official"
+        ),
+    }
 
-    # Send to LLM
-    result = llm_analyze(issue_summary, issue_status, comment_dicts)
 
+def _store_sentiment(conn, data: dict, result: dict, noisy: bool = False) -> None:
+    """Write an LLM sentiment result to the DB."""
     conn.execute(
         """INSERT OR REPLACE INTO issue_sentiment
            (issue_id, total_comments, text_length, resident_comment_count,
@@ -186,9 +192,9 @@ def process_issue(conn, issue_id: int, noisy: bool = False) -> bool:
            VALUES (?, ?, 0, ?, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
                    ?, ?, ?, ?, ?, ?, ?)""",
         (
-            issue_id,
-            total_comments,
-            resident_comment_count,
+            data["issue_id"],
+            data["total_comments"],
+            data["resident_comment_count"],
             result["interaction"]["label"],
             result["interaction"]["confidence"],
             f"llm:{DEFAULT_MODEL}",
@@ -202,11 +208,23 @@ def process_issue(conn, issue_id: int, noisy: bool = False) -> bool:
         i_res = result["interaction"]
         o_res = result["outcome"]
         log.info(
-            "    sentiment: %s/%s (%.0f%%/%.0f%%, interaction: \"%s\" | outcome: \"%s\")",
+            "    #%d sentiment: %s/%s (%.0f%%/%.0f%%, interaction: \"%s\" | outcome: \"%s\")",
+            data["issue_id"],
             i_res["label"], o_res["label"],
             i_res["confidence"] * 100, o_res["confidence"] * 100,
             i_res["reasoning"], o_res["reasoning"],
         )
+
+
+def process_issue(conn, issue_id: int, noisy: bool = False) -> bool:
+    """Flag auto-generated comments, extract employees, analyse sentiment
+    for a single issue.  Returns True if sentiment was analysed."""
+    _extract_issue(conn, issue_id, noisy=noisy)
+    data = _prepare_llm_data(conn, issue_id, noisy=noisy)
+    if data is None:
+        return False
+    result = llm_analyze(data["summary"], data["status"], data["comments"])
+    _store_sentiment(conn, data, result, noisy=noisy)
     return True
 
 
@@ -236,16 +254,17 @@ def reanalyze(noisy: bool = False) -> None:
         conn.close()
         return
 
-    log.info("Re-analysing %d issues via LLM...", total)
+    log.info(
+        "Re-analysing %d issues via LLM (%d concurrent)...",
+        total, LLM_CONCURRENCY,
+    )
 
-    analyzed = 0
-    for _i, row in enumerate(issue_ids):
+    # Prepare all work items up front (DB reads only)
+    work = []
+    for row in issue_ids:
         issue_id = row["id"]
         summary = row["summary"] or ""
         status = row["status"] or ""
-
-        if noisy:
-            log.info("  #%d %s", issue_id, summary[:60])
 
         all_comments = conn.execute(
             """SELECT comment, created_at, commenter_name,
@@ -258,63 +277,53 @@ def reanalyze(noisy: bool = False) -> None:
 
         if not all_comments:
             if noisy:
-                log.info("    sentiment: no analysable text")
+                log.info("  #%d — no analysable text, skipping", issue_id)
             continue
 
-        total_comments = len(all_comments)
         comment_dicts = [dict(c) for c in all_comments]
-
-        resident_comment_count = sum(
-            1 for c in comment_dicts
-            if not c["is_auto_generated"]
-            and c.get("commenter_role") != "Verified Official"
-        )
-
-        result = llm_analyze(summary, status, comment_dicts)
-
-        conn.execute(
-            """INSERT OR REPLACE INTO issue_sentiment
-               (issue_id, total_comments, text_length, resident_comment_count,
-                vader_compound, vader_pos, vader_neg, vader_neu,
-                roberta_positive, roberta_negative, roberta_neutral,
-                resolved_label, resolved_confidence, resolved_by, llm_reasoning,
-                outcome_label, outcome_confidence, outcome_reasoning)
-               VALUES (?, ?, 0, ?, NULL, NULL, NULL, NULL, NULL, NULL, NULL,
-                       ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                issue_id,
-                total_comments,
-                resident_comment_count,
-                result["interaction"]["label"],
-                result["interaction"]["confidence"],
-                f"llm:{DEFAULT_MODEL}",
-                result["interaction"]["reasoning"],
-                result["outcome"]["label"],
-                result["outcome"]["confidence"],
-                result["outcome"]["reasoning"],
+        work.append({
+            "issue_id": issue_id,
+            "summary": summary,
+            "status": status,
+            "comments": comment_dicts,
+            "total_comments": len(all_comments),
+            "resident_comment_count": sum(
+                1 for c in comment_dicts
+                if not c["is_auto_generated"]
+                and c.get("commenter_role") != "Verified Official"
             ),
-        )
-        conn.commit()
-        analyzed += 1
+        })
 
-        if noisy:
-            i_res = result["interaction"]
-            o_res = result["outcome"]
-            log.info(
-                "    sentiment: %s/%s (%.0f%%/%.0f%%, interaction: \"%s\" | outcome: \"%s\")",
-                i_res["label"], o_res["label"],
-                i_res["confidence"] * 100, o_res["confidence"] * 100,
-                i_res["reasoning"], o_res["reasoning"],
-            )
+    # Run LLM calls concurrently
+    analyzed = 0
+    with ThreadPoolExecutor(max_workers=LLM_CONCURRENCY) as pool:
+        future_map = {
+            pool.submit(
+                llm_analyze, item["summary"], item["status"], item["comments"],
+            ): item
+            for item in work
+        }
 
-        if analyzed % 10 == 0:
-            build_summaries()
-            if not noisy:
-                log.info("  %d/%d analysed", analyzed, total)
+        for future in as_completed(future_map):
+            data = future_map[future]
+            try:
+                result = future.result()
+            except Exception as e:
+                log.error("LLM error for #%d: %s", data["issue_id"], e)
+                continue
+
+            _store_sentiment(conn, data, result, noisy=noisy)
+            conn.commit()
+            analyzed += 1
+
+            if analyzed % 10 == 0:
+                build_summaries()
+                if not noisy:
+                    log.info("  %d/%d analysed", analyzed, len(work))
 
     build_summaries()
     conn.close()
-    log.info("Re-analysis complete: %d/%d issues analysed", analyzed, total)
+    log.info("Re-analysis complete: %d/%d issues analysed", analyzed, len(work))
 
 
 # ---------------------------------------------------------------------------
@@ -394,7 +403,9 @@ async def run_pipeline(
                 if not issues:
                     break
 
-                page_analyzed = 0
+                # Crawl all issues in this page, do DB extraction,
+                # and collect items that need LLM analysis.
+                pending_llm = []
                 for issue_data in issues:
                     issue_id = issue_data["id"]
                     if not crawler._store_issue(conn, issue_data):
@@ -416,15 +427,39 @@ async def run_pipeline(
                             issue_id, summary, len(raw_comments),
                         )
 
-                    if process_issue(conn, issue_id, noisy=noisy):
-                        page_analyzed += 1
-                        total_analyzed += 1
+                    _extract_issue(conn, issue_id, noisy=noisy)
+                    data = _prepare_llm_data(conn, issue_id, noisy=noisy)
+                    if data:
+                        pending_llm.append(data)
 
                     conn.commit()
                     total_crawled += 1
 
-                    if total_crawled % 10 == 0:
-                        build_summaries()
+                # Run LLM calls for this page concurrently
+                page_analyzed = 0
+                if pending_llm:
+                    with ThreadPoolExecutor(max_workers=LLM_CONCURRENCY) as pool:
+                        future_map = {
+                            pool.submit(
+                                llm_analyze,
+                                d["summary"], d["status"], d["comments"],
+                            ): d
+                            for d in pending_llm
+                        }
+                        for future in as_completed(future_map):
+                            data = future_map[future]
+                            try:
+                                result = future.result()
+                            except Exception as e:
+                                log.error(
+                                    "LLM error for #%d: %s",
+                                    data["issue_id"], e,
+                                )
+                                continue
+                            _store_sentiment(conn, data, result, noisy=noisy)
+                            page_analyzed += 1
+                            total_analyzed += 1
+                    conn.commit()
 
                 build_summaries()
 
