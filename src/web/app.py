@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
+from fastapi.responses import PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -21,6 +22,10 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 # Templates
 templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
+
+@app.get("/up")
+def health_check():
+    return PlainTextResponse("ok")
 
 # Include routers
 app.include_router(dashboard.router)
