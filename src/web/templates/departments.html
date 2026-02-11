@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Departments - SeeClickFix Sentiment{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Departments</h1>
+</div>
+
+{% if departments %}
+<table>
+    <thead>
+        <tr>
+            <th>Department</th>
+            <th class="text-right">Employees</th>
+            <th class="text-right">Issues</th>
+            <th class="text-right">Positive</th>
+            <th class="text-right">Negative</th>
+            <th>Distribution</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for d in departments %}
+        <tr>
+            <td><a href="/departments/{{ d.id }}">{{ d.name }}</a></td>
+            <td class="text-right text-muted">{{ d.employee_count }}</td>
+            <td class="text-right text-muted">{{ d.analyzed_comments or 0 }}</td>
+            <td class="text-right">
+                {% if d.positive_pct is not none %}
+                <span class="text-positive">{{ "%.0f"|format(d.positive_pct) }}%</span>
+                {% else %}<span class="text-muted">-</span>{% endif %}
+            </td>
+            <td class="text-right">
+                {% if d.negative_pct is not none %}
+                <span class="text-negative">{{ "%.0f"|format(d.negative_pct) }}%</span>
+                {% else %}<span class="text-muted">-</span>{% endif %}
+            </td>
+            <td style="min-width: 120px;">
+                {% if d.analyzed_comments and d.analyzed_comments > 0 %}
+                {% set pos = d.positive_pct or 0 %}
+                {% set neg = d.negative_pct or 0 %}
+                {% set neu = 100 - pos - neg %}
+                <div class="sentiment-bar">
+                    {% if pos > 0 %}<div class="segment segment-positive" style="width:{{ pos }}%"></div>{% endif %}
+                    {% if neu > 0 %}<div class="segment segment-neutral" style="width:{{ neu }}%"></div>{% endif %}
+                    {% if neg > 0 %}<div class="segment segment-negative" style="width:{{ neg }}%"></div>{% endif %}
+                </div>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p class="empty">No departments found. Run the extraction pipeline first.</p>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% block title %}{{ employee.name_parsed or employee.name_raw }} - SeeClickFix Sentiment{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>{{ employee.name_parsed or employee.name_raw }}</h1>
+    <p class="page-subtitle">
+        {% if employee.title_parsed %}{{ employee.title_parsed }}{% endif %}
+        {% if employee.dept_name %}
+        {% if employee.title_parsed %} &mdash; {% endif %}
+        <a href="/departments/{{ employee.department_id }}">{{ employee.dept_name }}</a>
+        {% endif %}
+    </p>
+</div>
+
+{% if summary %}
+<div class="stats">
+    <div class="stat">
+        <span class="stat-value">{{ summary.analyzed_comments }}</span>
+        <span class="stat-label">Issues</span>
+    </div>
+    <div class="stat">
+        <span class="stat-value positive">{{ "%.0f"|format(summary.positive_pct or 0) }}%</span>
+        <span class="stat-label">Positive</span>
+    </div>
+    <div class="stat">
+        <span class="stat-value negative">{{ "%.0f"|format(summary.negative_pct or 0) }}%</span>
+        <span class="stat-label">Negative</span>
+    </div>
+    <div class="stat">
+        <span class="stat-value">{{ "%.2f"|format(summary.avg_vader_compound or 0) }}</span>
+        <span class="stat-label">Avg Score</span>
+    </div>
+</div>
+
+{% set pos = summary.positive_pct or 0 %}
+{% set neg = summary.negative_pct or 0 %}
+{% set neu = 100 - pos - neg %}
+<div class="sentiment-bar sentiment-bar-lg">
+    {% if pos > 0 %}<div class="segment segment-positive" style="width:{{ pos }}%"></div>{% endif %}
+    {% if neu > 0 %}<div class="segment segment-neutral" style="width:{{ neu }}%"></div>{% endif %}
+    {% if neg > 0 %}<div class="segment segment-negative" style="width:{{ neg }}%"></div>{% endif %}
+</div>
+<div class="bar-legend">
+    <span class="sentiment sentiment-positive">{{ "%.0f"|format(pos) }}% positive</span>
+    <span class="sentiment sentiment-neutral">{{ "%.0f"|format(neu) }}% neutral</span>
+    <span class="sentiment sentiment-negative">{{ "%.0f"|format(neg) }}% negative</span>
+</div>
+{% endif %}
+
+<section>
+    <h2>Recent Comments</h2>
+    {% if recent_comments %}
+    {% for c in recent_comments %}
+    <div class="comment">
+        <div class="comment-context">
+            <a href="/issues/{{ c.issue_id }}">{{ c.issue_summary }}</a>
+            &middot; {{ c.created_at[:10] if c.created_at else '' }}
+            {% if c.html_url %}
+            &middot; <a href="{{ c.html_url }}" target="_blank" rel="noopener" class="external">SeeClickFix</a>
+            {% endif %}
+        </div>
+        <div class="comment-text">{{ c.comment[:500] }}{% if c.comment|length > 500 %}&hellip;{% endif %}</div>
+    </div>
+    {% endfor %}
+    {% else %}
+    <p class="empty">No comments found.</p>
+    {% endif %}
+</section>
+
+{% if issues %}
+<section>
+    <h2>Issues ({{ issues|length }})</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Issue</th>
+                <th>Type</th>
+                <th>Sentiment</th>
+                <th>Status</th>
+                <th>Date</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for i in issues %}
+            <tr>
+                <td class="truncate"><a href="/issues/{{ i.id }}">{{ i.summary }}</a></td>
+                <td class="text-muted">{{ i.request_type or '-' }}</td>
+                <td>{% if i.resolved_label %}<span class="sentiment sentiment-{{ i.resolved_label }}">{{ i.resolved_label }}</span>{% else %}<span class="text-muted">-</span>{% endif %}</td>
+                <td><span class="status">{{ i.status }}</span></td>
+                <td class="text-muted">{{ i.created_at[:10] if i.created_at else '' }}</td>
+                <td>{% if i.html_url %}<a href="{{ i.html_url }}" target="_blank" rel="noopener" class="external">SCF</a>{% endif %}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</section>
+{% endif %}
+{% endblock %}

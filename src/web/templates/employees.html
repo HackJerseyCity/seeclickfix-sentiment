@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}Employees - SeeClickFix Sentiment{% endblock %}
+
+{% macro sort_header(col, label) %}
+{% set new_order = 'asc' if (sort == col and order == 'desc') else 'desc' %}
+<a class="sort-link {% if sort == col %}active{% endif %}"
+   href="/employees?sort={{ col }}&order={{ new_order }}">
+    {{ label }}{% if sort == col %}{{ ' \u25B2' if order == 'asc' else ' \u25BC' }}{% endif %}
+</a>
+{% endmacro %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Employees</h1>
+</div>
+
+{% if employees %}
+<table>
+    <thead>
+        <tr>
+            <th>{{ sort_header('name', 'Name') }}</th>
+            <th>Title</th>
+            <th>{{ sort_header('dept', 'Department') }}</th>
+            <th class="text-right">{{ sort_header('comments', 'Issues') }}</th>
+            <th class="text-right">{{ sort_header('positive_pct', 'Positive') }}</th>
+            <th class="text-right">{{ sort_header('negative_pct', 'Negative') }}</th>
+            <th class="text-right">{{ sort_header('avg_sentiment', 'Score') }}</th>
+            <th>Distribution</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for e in employees %}
+        <tr>
+            <td><a href="/employees/{{ e.id }}">{{ e.name_parsed or e.name_raw }}</a></td>
+            <td class="text-muted">{{ e.title_parsed or '-' }}</td>
+            <td>
+                {% if e.dept_id %}
+                <a href="/departments/{{ e.dept_id }}">{{ e.dept_name }}</a>
+                {% else %}
+                <span class="text-muted">-</span>
+                {% endif %}
+            </td>
+            <td class="text-right text-muted">{{ e.analyzed_comments or 0 }}</td>
+            <td class="text-right">
+                {% if e.positive_pct is not none %}
+                <span class="text-positive">{{ "%.0f"|format(e.positive_pct) }}%</span>
+                {% else %}<span class="text-muted">-</span>{% endif %}
+            </td>
+            <td class="text-right">
+                {% if e.negative_pct is not none %}
+                <span class="text-negative">{{ "%.0f"|format(e.negative_pct) }}%</span>
+                {% else %}<span class="text-muted">-</span>{% endif %}
+            </td>
+            <td class="text-right">
+                {% if e.avg_vader_compound is not none %}
+                {{ "%.2f"|format(e.avg_vader_compound) }}
+                {% else %}<span class="text-muted">-</span>{% endif %}
+            </td>
+            <td style="min-width: 100px;">
+                {% if e.analyzed_comments and e.analyzed_comments > 0 %}
+                {% set pos = e.positive_pct or 0 %}
+                {% set neg = e.negative_pct or 0 %}
+                {% set neu = 100 - pos - neg %}
+                <div class="sentiment-bar">
+                    {% if pos > 0 %}<div class="segment segment-positive" style="width:{{ pos }}%"></div>{% endif %}
+                    {% if neu > 0 %}<div class="segment segment-neutral" style="width:{{ neu }}%"></div>{% endif %}
+                    {% if neg > 0 %}<div class="segment segment-negative" style="width:{{ neg }}%"></div>{% endif %}
+                </div>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p class="empty">No employees found. Run the extraction pipeline first.</p>
+{% endif %}
+{% endblock %}

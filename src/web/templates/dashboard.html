@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+{% block title %}Overview - SeeClickFix Sentiment{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Overview</h1>
+</div>
+
+<div class="stats">
+    <div class="stat">
+        <span class="stat-value">{{ "{:,}".format(issue_count) }}</span>
+        <span class="stat-label">Issues</span>
+    </div>
+    <div class="stat">
+        <span class="stat-value">{{ "{:,}".format(comment_count) }}</span>
+        <span class="stat-label">Comments</span>
+    </div>
+    <div class="stat">
+        <span class="stat-value">{{ "{:,}".format(employee_count) }}</span>
+        <span class="stat-label">Employees</span>
+    </div>
+    <div class="stat">
+        <span class="stat-value">{{ "{:,}".format(dept_count) }}</span>
+        <span class="stat-label">Departments</span>
+    </div>
+    <div class="stat">
+        <span class="stat-value">{{ "{:,}".format(analyzed_count) }}</span>
+        <span class="stat-label">Issues Analyzed</span>
+    </div>
+</div>
+
+{% if crawl_windows and crawl_windows.get('total', 0) > 0 %}
+{% set pct = ((crawl_windows.get('completed', 0) / crawl_windows.get('total', 1)) * 100)|int %}
+<div class="crawl-progress">
+    <span>Crawl: {{ crawl_windows.get('completed', 0) }}/{{ crawl_windows.get('total', 0) }} windows</span>
+    <div class="progress-track">
+        <div class="progress-fill" style="width: {{ pct }}%"></div>
+    </div>
+    {% if crawl_windows.get('in_progress', 0) > 0 %}
+    <span>{{ crawl_windows.get('in_progress', 0) }} in progress</span>
+    {% endif %}
+</div>
+{% endif %}
+
+<div class="grid-2">
+    <section style="margin-top: 0;">
+        <h2 style="margin-top: 0;">Most Positive</h2>
+        {% if top_employees %}
+        <table>
+            <thead>
+                <tr>
+                    <th>Employee</th>
+                    <th>Department</th>
+                    <th class="text-right">Positive</th>
+                    <th class="text-right">Issues</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for e in top_employees %}
+                <tr>
+                    <td><a href="/employees/{{ e.id }}">{{ e.name_parsed or e.name_raw }}</a></td>
+                    <td class="text-muted">{{ e.dept_name or '-' }}</td>
+                    <td class="text-right text-positive">{{ "%.0f"|format(e.positive_pct or 0) }}%</td>
+                    <td class="text-right text-muted">{{ e.analyzed_comments }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p class="empty">No data yet. Run the analysis pipeline first.</p>
+        {% endif %}
+    </section>
+
+    <section style="margin-top: 0;">
+        <h2 style="margin-top: 0;">Most Negative</h2>
+        {% if bottom_employees %}
+        <table>
+            <thead>
+                <tr>
+                    <th>Employee</th>
+                    <th>Department</th>
+                    <th class="text-right">Negative</th>
+                    <th class="text-right">Issues</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for e in bottom_employees %}
+                <tr>
+                    <td><a href="/employees/{{ e.id }}">{{ e.name_parsed or e.name_raw }}</a></td>
+                    <td class="text-muted">{{ e.dept_name or '-' }}</td>
+                    <td class="text-right text-negative">{{ "%.0f"|format(e.negative_pct or 0) }}%</td>
+                    <td class="text-right text-muted">{{ e.analyzed_comments }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p class="empty">No data yet.</p>
+        {% endif %}
+    </section>
+</div>
+
+{% if dept_rankings %}
+<section>
+    <h2>Departments</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Department</th>
+                <th class="text-right">Employees</th>
+                <th class="text-right">Issues</th>
+                <th class="text-right">Positive</th>
+                <th class="text-right">Negative</th>
+                <th>Distribution</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for d in dept_rankings %}
+            <tr>
+                <td><a href="/departments/{{ d.id }}">{{ d.name }}</a></td>
+                <td class="text-right text-muted">{{ d.employee_count }}</td>
+                <td class="text-right text-muted">{{ d.analyzed_comments }}</td>
+                <td class="text-right text-positive">{{ "%.0f"|format(d.positive_pct or 0) }}%</td>
+                <td class="text-right text-negative">{{ "%.0f"|format(d.negative_pct or 0) }}%</td>
+                <td style="min-width: 120px;">
+                    {% if d.analyzed_comments and d.analyzed_comments > 0 %}
+                    {% set pos = d.positive_pct or 0 %}
+                    {% set neg = d.negative_pct or 0 %}
+                    {% set neu = 100 - pos - neg %}
+                    <div class="sentiment-bar">
+                        {% if pos > 0 %}<div class="segment segment-positive" style="width:{{ pos }}%"></div>{% endif %}
+                        {% if neu > 0 %}<div class="segment segment-neutral" style="width:{{ neu }}%"></div>{% endif %}
+                        {% if neg > 0 %}<div class="segment segment-negative" style="width:{{ neg }}%"></div>{% endif %}
+                    </div>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</section>
+{% endif %}
+{% endblock %}

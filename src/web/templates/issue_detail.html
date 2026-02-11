@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block title %}Issue #{{ issue.id }} - SeeClickFix Sentiment{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>{{ issue.summary or 'Issue #' ~ issue.id }}</h1>
+    <div class="issue-meta">
+        <span class="status">{{ issue.status }}</span>
+        {% if issue.request_type %}<span>{{ issue.request_type }}</span>{% endif %}
+        {% if issue.address %}<span>{{ issue.address }}</span>{% endif %}
+        {% if issue.html_url %}
+        <a href="{{ issue.html_url }}" target="_blank" rel="noopener" class="external">SeeClickFix</a>
+        {% endif %}
+    </div>
+</div>
+
+{% if issue.description %}
+<div class="issue-description">
+    {{ issue.description }}
+    <div style="margin-top: var(--space-4); font-size: var(--text-xs); color: var(--gray-400);">
+        Reported {{ issue.created_at[:10] if issue.created_at else 'unknown' }}{% if issue.reporter_name %} by {{ issue.reporter_name }}{% endif %}{% if issue.closed_at %} &middot; Closed {{ issue.closed_at[:10] }}{% endif %}
+    </div>
+</div>
+{% endif %}
+
+{% if issue.sentiment_label %}
+<div class="conversation-sentiment" style="margin: var(--space-6) 0;">
+    <h3 style="margin-bottom: var(--space-2);">Conversation Sentiment</h3>
+    {% if issue.sentiment_by == 'no-resident' %}
+    <div>
+        <span style="font-size: var(--text-sm); color: var(--gray-400); font-style: italic;">
+            No resident feedback &mdash; employee-only thread
+        </span>
+    </div>
+    {% else %}
+    <div>
+        <span class="sentiment sentiment-{{ issue.sentiment_label }}">
+            {{ issue.sentiment_label }} {{ "%.0f"|format(issue.sentiment_confidence * 100) }}%
+        </span>
+        <span style="font-size: var(--text-xs); color: var(--gray-400); margin-left: var(--space-2);">
+            via {{ issue.sentiment_by }}{% if issue.sentiment_vader is not none %} &middot; VADER {{ "%.2f"|format(issue.sentiment_vader) }}{% endif %} &middot; {{ issue.sentiment_comments }} comments analyzed
+        </span>
+    </div>
+    {% set pos = 0 %}{% set neg = 0 %}{% set neu = 100 %}
+    {% if issue.sentiment_label == 'positive' %}{% set pos = (issue.sentiment_confidence * 100)|int %}{% set neu = 100 - pos %}
+    {% elif issue.sentiment_label == 'negative' %}{% set neg = (issue.sentiment_confidence * 100)|int %}{% set neu = 100 - neg %}
+    {% elif issue.sentiment_label == 'mixed' %}{% set pos = 40 %}{% set neg = 40 %}{% set neu = 20 %}
+    {% endif %}
+    <div class="sentiment-bar" style="margin-top: var(--space-2); height: 12px;">
+        {% if pos > 0 %}<div class="segment segment-positive" style="width:{{ pos }}%"></div>{% endif %}
+        {% if neu > 0 %}<div class="segment segment-neutral" style="width:{{ neu }}%"></div>{% endif %}
+        {% if neg > 0 %}<div class="segment segment-negative" style="width:{{ neg }}%"></div>{% endif %}
+    </div>
+    {% endif %}
+</div>
+{% endif %}
+
+<h2>Comments ({{ comments|length }})</h2>
+
+{% for c in comments %}
+<div class="comment">
+    <div class="comment-meta">
+        <span class="comment-author">{{ c.commenter_name or 'Unknown' }}</span>
+        {% if c.commenter_role == 'Verified Official' %}
+        <span class="comment-role">Official</span>
+        {% endif %}
+        <span class="comment-date">{{ c.created_at[:10] if c.created_at else '' }}</span>
+        {% if c.is_auto_generated %}
+        <span class="comment-role">auto</span>
+        {% endif %}
+    </div>
+    <div class="comment-text {% if c.is_auto_generated %}faded{% endif %}">{{ c.comment }}</div>
+</div>
+{% endfor %}
+
+{% if not comments %}
+<p class="empty">No comments found for this issue.</p>
+{% endif %}
+{% endblock %}
