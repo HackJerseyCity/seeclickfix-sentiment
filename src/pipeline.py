@@ -342,8 +342,10 @@ async def run_pipeline(
     After all windows are complete the function returns.
     """
     from src.crawler.client import SeeClickFixCrawler
+    from src.crawler.http_source import HTTPSource
 
-    async with SeeClickFixCrawler(per_page=per_page) as crawler:
+    async with HTTPSource(per_page=per_page) as source:
+        crawler = SeeClickFixCrawler(source)
         conn = get_db()
 
         if force:
@@ -353,7 +355,7 @@ async def run_pipeline(
             log.info("Force mode: reset crawl state and sentiment")
 
         ed = end_date or datetime.now().strftime("%Y-%m-%d")
-        crawler._init_crawl_windows(conn, start_date, ed)
+        crawler.init_crawl_windows(conn, start_date, ed)
 
         windows = conn.execute(
             """SELECT * FROM crawl_state
@@ -397,7 +399,7 @@ async def run_pipeline(
             conn.commit()
 
             while True:
-                issues, pagination = await crawler.fetch_issues_page(
+                issues, pagination = await source.fetch_issues_page(
                     page=page, after=ws, before=we
                 )
                 if not issues:
@@ -408,12 +410,12 @@ async def run_pipeline(
                 pending_llm = []
                 for issue_data in issues:
                     issue_id = issue_data["id"]
-                    if not crawler._store_issue(conn, issue_data):
+                    if not crawler.store_issue(conn, issue_data):
                         continue
 
-                    raw_comments = await crawler.fetch_comments(issue_id)
+                    raw_comments = await source.fetch_comments(issue_id)
                     if raw_comments:
-                        crawler._store_comments(conn, issue_id, raw_comments)
+                        crawler.store_comments(conn, issue_id, raw_comments)
                     conn.execute(
                         "UPDATE issues SET comments_fetched = 1 "
                         "WHERE id = ?",

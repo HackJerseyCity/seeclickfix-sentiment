@@ -18,16 +18,24 @@ console = Console()
 FORCE_HELP = "Re-run from scratch, ignoring cached/completed work"
 
 
-def _require_ollama():
-    """Check Ollama is running and model is available. Exit if not."""
-    from src.sentiment.llm import check_ollama, DEFAULT_MODEL
+def _require_llm():
+    """Check LLM backend is available. Exit if not."""
+    from src.config import LLM_BACKEND
+    from src.sentiment.llm import check_llm, DEFAULT_MODEL
 
-    if not check_ollama():
-        console.print(
-            f"[bold red]Ollama is not running or model '{DEFAULT_MODEL}' is not available.[/bold red]\n"
-            f"Start Ollama and pull the model:\n"
-            f"  ollama pull {DEFAULT_MODEL}\n"
-        )
+    if not check_llm():
+        if LLM_BACKEND == "openai":
+            console.print(
+                "[bold red]OPENAI_API_KEY is not set.[/bold red]\n"
+                "Export your key:\n"
+                "  export OPENAI_API_KEY=sk-...\n"
+            )
+        else:
+            console.print(
+                f"[bold red]Ollama is not running or model '{DEFAULT_MODEL}' is not available.[/bold red]\n"
+                f"Start Ollama and pull the model:\n"
+                f"  ollama pull {DEFAULT_MODEL}\n"
+            )
         sys.exit(1)
 
 
@@ -42,9 +50,11 @@ def crawl(
 ):
     """Crawl SeeClickFix issues and comments."""
     from src.crawler.client import SeeClickFixCrawler
+    from src.crawler.http_source import HTTPSource
 
     async def _run():
-        async with SeeClickFixCrawler(per_page=per_page) as crawler:
+        async with HTTPSource(per_page=per_page) as source:
+            crawler = SeeClickFixCrawler(source)
             stats = await crawler.crawl_all(
                 start_date=start_date,
                 end_date=end_date,
@@ -55,7 +65,7 @@ def crawl(
             console.print(f"\n[bold green]Crawl complete![/bold green]")
             console.print(f"  Issues: {stats['issues_fetched']}")
             console.print(f"  Comments: {stats['comments_fetched']}")
-            console.print(f"  API calls: {stats['api_calls']}")
+            console.print(f"  API calls: {source.api_calls}")
 
     asyncio.run(_run())
 
@@ -70,9 +80,11 @@ def crawl_issues(
 ):
     """Crawl only issues (no comments)."""
     from src.crawler.client import SeeClickFixCrawler
+    from src.crawler.http_source import HTTPSource
 
     async def _run():
-        async with SeeClickFixCrawler(per_page=per_page) as crawler:
+        async with HTTPSource(per_page=per_page) as source:
+            crawler = SeeClickFixCrawler(source)
             await crawler.crawl_issues(
                 start_date=start_date, end_date=end_date, limit=limit, force=force
             )
@@ -87,9 +99,11 @@ def crawl_comments(
 ):
     """Fetch comments for already-crawled issues."""
     from src.crawler.client import SeeClickFixCrawler
+    from src.crawler.http_source import HTTPSource
 
     async def _run():
-        async with SeeClickFixCrawler() as crawler:
+        async with HTTPSource() as source:
+            crawler = SeeClickFixCrawler(source)
             await crawler.crawl_comments(limit=limit, force=force)
 
     asyncio.run(_run())
@@ -110,7 +124,7 @@ def analyze(
     force: bool = typer.Option(False, "--force", help=FORCE_HELP),
 ):
     """Run sentiment analysis on employee comments."""
-    _require_ollama()
+    _require_llm()
     from src.sentiment.analyzer import run_analysis
 
     stats = run_analysis(force=force)
@@ -202,10 +216,11 @@ def demo(
 ):
     """Run a demo: crawl a small sample, analyze, and launch the web server."""
     from src.crawler.client import SeeClickFixCrawler
+    from src.crawler.http_source import HTTPSource
     from src.extraction.employees import run_extraction
     from src.sentiment.analyzer import run_analysis
 
-    _require_ollama()
+    _require_llm()
 
     console.print("[bold cyan]SeeClickFix Sentiment Analysis - Demo Mode[/bold cyan]\n")
 
@@ -213,7 +228,8 @@ def demo(
     console.print("[bold]Step 1: Crawling recent issues...[/bold]")
 
     async def _crawl():
-        async with SeeClickFixCrawler() as crawler:
+        async with HTTPSource() as source:
+            crawler = SeeClickFixCrawler(source)
             await crawler.crawl_all(
                 start_date="2025-01-01",
                 issue_limit=issue_limit,
@@ -266,7 +282,7 @@ def live(
 
     from src.pipeline import reanalyze as pipeline_reanalyze, run_pipeline
 
-    _require_ollama()
+    _require_llm()
     init_db()
 
     # --- Start web server in a background thread ---

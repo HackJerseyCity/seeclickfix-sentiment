@@ -1,13 +1,27 @@
-"""LLM-based sentiment analysis via Ollama."""
+"""LLM-based sentiment analysis via OpenAI or Ollama."""
 
 from __future__ import annotations
 
 import json
+import os
 import re
 
 import httpx
 
-from src.config import OLLAMA_URL, OLLAMA_MODEL as DEFAULT_MODEL
+from src.config import (
+    LLM_BACKEND,
+    OLLAMA_URL,
+    OLLAMA_MODEL,
+    OPENAI_MODEL,
+)
+
+DEFAULT_MODEL = OPENAI_MODEL if LLM_BACKEND == "openai" else OLLAMA_MODEL
+
+SYSTEM_PROMPT = (
+    "You are a sentiment classifier for city government service requests. "
+    "You analyze conversations between residents and city officials. "
+    "Respond with ONLY valid JSON, no other text."
+)
 
 
 def build_prompt(summary: str, status: str, comments: list[dict]) -> str:
@@ -36,38 +50,40 @@ def build_prompt(summary: str, status: str, comments: list[dict]) -> str:
     lines.append(
         "Analyze this conversation on TWO dimensions.\n"
         "\n"
-        "IMPORTANT FILTERING RULES (apply before analysis):\n"
+        "IMPORTANT: All analysis is from the REPORTING USER's perspective.\n"
+        "\n"
+        "FILTERING RULES (apply before analysis):\n"
         "- Ignore auto-generated administrative messages (e.g. 'X assigned this to Y',\n"
         "  'Status changed to ...', 'Issue moved to ...'). These carry no sentiment.\n"
-        "- If a thread contains ONLY administrative/auto messages followed by a closure,\n"
-        "  rate both interaction and outcome as NEUTRAL.\n"
+        "- If a thread contains ONLY official/auto comments with NO resident comments,\n"
+        "  rate interaction as NEUTRAL — there is no resident interaction to evaluate.\n"
         "\n"
         "1. INTERACTION quality: How did city staff communicate with residents?\n"
-        "   - Focus primarily on threads where RESIDENTS participate. A back-and-forth\n"
-        "     between a resident and an official is the strongest signal.\n"
-        "   - Threads with only official/auto comments (no resident voices) have very\n"
-        "     limited interaction signal — lean toward NEUTRAL unless tone is notable.\n"
-        "   - POSITIVE = productive communication that advances the issue. Officials are\n"
-        "     responsive, helpful, and use professional language. A polite explanation\n"
-        "     of why no action is needed counts as positive.\n"
-        "   - NEGATIVE = city officials are confrontational, dismissive, or generally\n"
-        "     mean. Includes aggressive or unhelpful language, ignored complaints, or\n"
-        "     hostile exchanges.\n"
+        "   - If there are NO resident comments in the thread, interaction is NEUTRAL.\n"
+        "     Officials talking among themselves or posting updates with no resident\n"
+        "     response does not count as an interaction.\n"
+        "   - POSITIVE = productive back-and-forth between residents and officials.\n"
+        "     Officials are responsive, helpful, and professional.\n"
+        "   - NEGATIVE = city officials are confrontational, dismissive, or unhelpful.\n"
+        "     Includes aggressive language, ignored complaints, or hostile exchanges.\n"
+        "   - Repeated follow-ups from residents asking for updates or ETAs with vague\n"
+        "     or deflecting responses from officials is a NEGATIVE signal — it means\n"
+        "     the resident is not getting a satisfactory answer.\n"
         "   - ALL-CAPS responses from officials are a negative signal (reads as shouting).\n"
         "\n"
-        "2. OUTCOME: Was the reported problem resolved with action?\n"
-        "   - POSITIVE = the city took action to address the issue (fixed, repaired,\n"
-        "     scheduled work, etc.), ideally confirmed by positive resident feedback.\n"
-        "   - NEGATIVE = a closure followed by resident complaints or continued\n"
-        "     dissatisfaction. Also negative: 'warnings' or citations issued for\n"
-        "     behavior that is objectively problematic (e.g. code violations on\n"
-        "     someone's property reported by a neighbor — the warning itself is a\n"
-        "     negative outcome for the subject). Also negative: the issue was ignored,\n"
-        "     brushed off, or actively disputed.\n"
+        "2. OUTCOME: Was the reported problem resolved, from the REPORTING USER's perspective?\n"
+        "   - POSITIVE = the city took action that benefits the reporter: fixed the\n"
+        "     problem, issued summons/violations against an offending party, scheduled\n"
+        "     repairs, confirmed resolution. Enforcement actions (summons, citations,\n"
+        "     violations) are POSITIVE outcomes — the reporter wanted action and got it.\n"
+        "   - NEGATIVE = the issue was ignored, brushed off, or closed without action\n"
+        "     despite the reporter's dissatisfaction. Resident complaints after closure\n"
+        "     are a strong negative signal.\n"
+        "   - A long delay between the initial report and final resolution (weeks or\n"
+        "     more) is a negative signal for outcome, especially for urgent issues.\n"
         "   - NEUTRAL = factual closure (e.g. 'this is county jurisdiction', 'work is\n"
         "     scheduled but not yet done'), in progress, acknowledged but unclear\n"
-        "     resolution, or not applicable. A factual statement about why something\n"
-        "     can't be done is NOT negative — it is neutral.\n"
+        "     resolution, or not enough information to judge.\n"
         "\n"
         "Respond with ONLY valid JSON:\n"
         '{"interaction": {"label": "positive"|"negative"|"neutral"|"mixed", '
@@ -123,13 +139,46 @@ def _normalize_dimension(data: dict) -> dict:
 _NEUTRAL_DIMENSION = {"label": "neutral", "confidence": 0.0, "reasoning": ""}
 
 
+def _call_openai(prompt: str, model: str) -> str:
+    """Call OpenAI API and return the response text."""
+    from openai import OpenAI
+
+    client = OpenAI()
+    resp = client.chat.completions.create(
+        model=model,
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": prompt},
+        ],
+        temperature=0.1,
+        response_format={"type": "json_object"},
+    )
+    return resp.choices[0].message.content or ""
+
+
+def _call_ollama(prompt: str, model: str) -> str:
+    """Call Ollama API and return the response text."""
+    resp = httpx.post(
+        f"{OLLAMA_URL}/api/generate",
+        json={
+            "model": model,
+            "prompt": prompt,
+            "stream": False,
+            "options": {"temperature": 0.1},
+        },
+        timeout=120.0,
+    )
+    resp.raise_for_status()
+    return resp.json().get("response", "")
+
+
 def analyze_sentiment(
     summary: str,
     status: str,
     comments: list[dict],
     model: str = DEFAULT_MODEL,
 ) -> dict:
-    """Analyze sentiment of an issue thread via Ollama.
+    """Analyze sentiment of an issue thread via LLM.
 
     Returns {"interaction": {"label", "confidence", "reasoning"},
              "outcome": {"label", "confidence", "reasoning"}}.
@@ -137,22 +186,14 @@ def analyze_sentiment(
     prompt = build_prompt(summary, status, comments)
 
     try:
-        resp = httpx.post(
-            f"{OLLAMA_URL}/api/generate",
-            json={
-                "model": model,
-                "prompt": prompt,
-                "stream": False,
-                "options": {"temperature": 0.1},
-            },
-            timeout=120.0,
-        )
-        resp.raise_for_status()
-    except (httpx.HTTPError, httpx.TimeoutException) as e:
-        fallback = {**_NEUTRAL_DIMENSION, "reasoning": f"Ollama request failed: {e}"}
+        if LLM_BACKEND == "openai":
+            response_text = _call_openai(prompt, model)
+        else:
+            response_text = _call_ollama(prompt, model)
+    except Exception as e:
+        fallback = {**_NEUTRAL_DIMENSION, "reasoning": f"LLM request failed: {e}"}
         return {"interaction": fallback, "outcome": dict(fallback)}
 
-    response_text = resp.json().get("response", "")
     parsed = _parse_llm_json(response_text)
 
     if not parsed:
@@ -173,7 +214,7 @@ def analyze_sentiment(
     return {"interaction": interaction, "outcome": dict(_NEUTRAL_DIMENSION)}
 
 
-def check_ollama(model: str = DEFAULT_MODEL) -> bool:
+def check_ollama(model: str = OLLAMA_MODEL) -> bool:
     """Check if Ollama is running and the model is available."""
     try:
         resp = httpx.get(f"{OLLAMA_URL}/api/tags", timeout=5.0)
@@ -184,3 +225,15 @@ def check_ollama(model: str = DEFAULT_MODEL) -> bool:
         return any(model in name or name.startswith(model.split(":")[0]) for name in available)
     except (httpx.HTTPError, httpx.TimeoutException):
         return False
+
+
+def check_openai() -> bool:
+    """Check if OpenAI API key is set."""
+    return bool(os.environ.get("OPENAI_API_KEY"))
+
+
+def check_llm() -> bool:
+    """Check if the configured LLM backend is available."""
+    if LLM_BACKEND == "openai":
+        return check_openai()
+    return check_ollama()

@@ -5,6 +5,8 @@ from pathlib import Path
 
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3.1:8b")
+OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+LLM_BACKEND = os.environ.get("LLM_BACKEND", "openai")  # "openai" or "ollama"
 LLM_CONCURRENCY = int(os.environ.get("LLM_CONCURRENCY", "4"))
 
 DATA_DIR = Path(os.environ.get("DATA_DIR", str(Path(__file__).parent.parent / "data")))

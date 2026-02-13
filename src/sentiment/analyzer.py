@@ -11,7 +11,7 @@ from src.sentiment.llm import analyze_sentiment, DEFAULT_MODEL
 console = Console()
 
 
-def analyze_issues(batch_size: int = 50, force: bool = False) -> dict:
+def analyze_issues(batch_size: int = 20, force: bool = False) -> dict:
     """Run LLM sentiment analysis on full issue conversations.
 
     For each issue with employee comments, sends the full comment thread
@@ -106,9 +106,10 @@ def analyze_issues(batch_size: int = 50, force: bool = False) -> dict:
             stats["analyzed"] += 1
             progress.update(task, advance=1)
 
-            # Commit in batches
+            # Commit and rebuild summaries in batches
             if stats["analyzed"] % batch_size == 0:
                 conn.commit()
+                build_summaries()
 
     conn.commit()
     conn.close()

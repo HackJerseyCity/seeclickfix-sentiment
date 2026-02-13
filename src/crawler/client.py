@@ -1,161 +1,41 @@
-"""Rate-limited SeeClickFix API client with checkpoint/resume crawling."""
+"""Crawl orchestrator — storage, windowing, and checkpoint/resume logic.
+
+The actual data fetching is delegated to a DataSource (see source.py).
+"""
 
 from __future__ import annotations
 
-import asyncio
-import json
 import re
 import time
 from datetime import datetime, timedelta
-from pathlib import Path
-from typing import Optional
 
-import httpx
 from rich.console import Console
 
-from src.models.database import get_db, init_db, DATA_DIR
-from src.models.schema import APIIssue, APIComment, APICommenter
+from src.crawler.source import DataSource
+from src.models.database import get_db, init_db
 
 console = Console()
 
-BASE_URL = "https://seeclickfix.com/api/v2"
-
-# Jersey City bounding box
-JC_BOUNDS = {
-    "min_lat": 40.651530,
-    "min_lng": -74.149293,
-    "max_lat": 40.776051,
-    "max_lng": -74.003896,
-}
-
-STATUSES = "open,acknowledged,closed,archived"
-
 # Organizations outside Jersey City that overlap with the bounding box
-EXCLUDED_ORGS = {"Town of Kearny"}
-RATE_LIMIT = 20  # requests per minute
-RATE_WINDOW = 60  # seconds
-
-# Crawl state file for quick resume info
-CRAWL_STATE_FILE = DATA_DIR / "crawl_state.json"
-
-
-class RateLimiter:
-    """Token bucket rate limiter: max `rate` requests per `window` seconds."""
-
-    def __init__(self, rate: int = RATE_LIMIT, window: float = RATE_WINDOW):
-        self.rate = rate
-        self.window = window
-        self.tokens: list[float] = []
-
-    async def acquire(self) -> None:
-        """Wait until a request slot is available."""
-        while True:
-            now = time.monotonic()
-            # Remove expired tokens
-            self.tokens = [t for t in self.tokens if now - t < self.window]
-            if len(self.tokens) < self.rate:
-                self.tokens.append(now)
-                return
-            # Wait until the oldest token expires
-            wait_time = self.window - (now - self.tokens[0]) + 0.1
-            await asyncio.sleep(wait_time)
+EXCLUDED_ORGS = {"Town of Kearny", "City of Newark"}
 
 
 class SeeClickFixCrawler:
-    """Async crawler for SeeClickFix API with date-windowed pagination."""
+    """Orchestrator: date-windowed pagination, storage, and checkpoint/resume.
 
-    def __init__(self, per_page: int = 100):
-        self.per_page = per_page
-        self.rate_limiter = RateLimiter()
-        self.client: Optional[httpx.AsyncClient] = None
-        self.stats = {"issues_fetched": 0, "comments_fetched": 0, "api_calls": 0}
+    Reads issues/comments from any ``DataSource`` and writes them to the
+    local SQLite database.
+    """
 
-    async def __aenter__(self):
-        self.client = httpx.AsyncClient(
-            timeout=30.0,
-            headers={"User-Agent": "SeeClickFix-Sentiment-Analyzer/0.1"},
-        )
-        return self
+    def __init__(self, source: DataSource):
+        self.source = source
+        self.stats = {"issues_fetched": 0, "comments_fetched": 0}
 
-    async def __aexit__(self, *args):
-        if self.client:
-            await self.client.aclose()
+    # ------------------------------------------------------------------
+    # Storage helpers (public — also used by pipeline.py)
+    # ------------------------------------------------------------------
 
-    async def _request(self, url: str, params: dict | None = None) -> dict | None:
-        """Make a rate-limited request with retry on 429/5xx."""
-        await self.rate_limiter.acquire()
-        self.stats["api_calls"] += 1
-
-        for attempt in range(5):
-            try:
-                resp = await self.client.get(url, params=params)
-
-                if resp.status_code == 429:
-                    retry_after = int(resp.headers.get("Retry-After", 60))
-                    console.print(
-                        f"[yellow]Rate limited. Waiting {retry_after}s...[/yellow]"
-                    )
-                    await asyncio.sleep(retry_after)
-                    continue
-
-                if resp.status_code >= 500:
-                    wait = min(2 ** (attempt + 1), 60)
-                    console.print(
-                        f"[yellow]Server error {resp.status_code}. Retrying in {wait}s...[/yellow]"
-                    )
-                    await asyncio.sleep(wait)
-                    continue
-
-                resp.raise_for_status()
-                return resp.json()
-
-            except httpx.TimeoutException:
-                wait = min(2 ** (attempt + 1), 60)
-                console.print(
-                    f"[yellow]Timeout. Retrying in {wait}s...[/yellow]"
-                )
-                await asyncio.sleep(wait)
-            except httpx.HTTPStatusError as e:
-                console.print(f"[red]HTTP error: {e}[/red]")
-                return None
-
-        console.print("[red]Max retries exceeded[/red]")
-        return None
-
-    async def fetch_issues_page(
-        self,
-        page: int = 1,
-        after: str | None = None,
-        before: str | None = None,
-    ) -> tuple[list[dict], dict]:
-        """Fetch a single page of issues. Returns (issues, pagination_metadata)."""
-        params = {
-            **JC_BOUNDS,
-            "status": STATUSES,
-            "page": page,
-            "per_page": self.per_page,
-        }
-        if after:
-            params["after"] = after
-        if before:
-            params["before"] = before
-
-        data = await self._request(f"{BASE_URL}/issues", params=params)
-        if not data:
-            return [], {}
-
-        issues = data.get("issues", [])
-        metadata = data.get("metadata", {}).get("pagination", {})
-        return issues, metadata
-
-    async def fetch_comments(self, issue_id: int) -> list[dict]:
-        """Fetch all comments for an issue."""
-        data = await self._request(f"{BASE_URL}/issues/{issue_id}/comments")
-        if not data:
-            return []
-        return data.get("comments", [])
-
-    def _store_issue(self, conn, issue_data: dict) -> bool:
+    def store_issue(self, conn, issue_data: dict) -> bool:
         """Upsert an issue into the database. Returns False if filtered out."""
         request_type = issue_data.get("request_type")
         rt_title = None
@@ -202,7 +82,7 @@ class SeeClickFixCrawler:
         )
         return True
 
-    def _store_comments(self, conn, issue_id: int, comments: list[dict]) -> int:
+    def store_comments(self, conn, issue_id: int, comments: list[dict]) -> int:
         """Store comments for an issue. Returns count stored."""
         count = 0
         for c in comments:
@@ -240,6 +120,10 @@ class SeeClickFixCrawler:
             count += 1
         return count
 
+    # ------------------------------------------------------------------
+    # Crawl-window helpers
+    # ------------------------------------------------------------------
+
     def _generate_windows(
         self, start_date: str, end_date: str, months: int = 1
     ) -> list[tuple[str, str]]:
@@ -261,14 +145,7 @@ class SeeClickFixCrawler:
 
         return windows
 
-    def _get_crawl_state(self, conn) -> list[dict]:
-        """Get current crawl state from the database."""
-        rows = conn.execute(
-            "SELECT * FROM crawl_state ORDER BY window_start"
-        ).fetchall()
-        return [dict(r) for r in rows]
-
-    def _init_crawl_windows(
+    def init_crawl_windows(
         self, conn, start_date: str, end_date: str
     ) -> None:
         """Initialize crawl windows, adding any that don't already exist."""
@@ -298,6 +175,10 @@ class SeeClickFixCrawler:
                 f"[dim]All {len(windows)} crawl windows already initialized[/dim]"
             )
 
+    # ------------------------------------------------------------------
+    # High-level crawl methods
+    # ------------------------------------------------------------------
+
     async def crawl_issues(
         self,
         start_date: str = "2015-01-01",
@@ -317,7 +198,7 @@ class SeeClickFixCrawler:
             conn.commit()
             console.print("[yellow]Force mode: reset all crawl windows[/yellow]")
 
-        self._init_crawl_windows(conn, start_date, end_date)
+        self.init_crawl_windows(conn, start_date, end_date)
 
         # Find incomplete windows
         windows = conn.execute(
@@ -362,7 +243,7 @@ class SeeClickFixCrawler:
 
             page = start_page
             while True:
-                issues, pagination = await self.fetch_issues_page(
+                issues, pagination = await self.source.fetch_issues_page(
                     page=page, after=ws, before=we
                 )
 
@@ -370,7 +251,7 @@ class SeeClickFixCrawler:
                     break
 
                 for issue_data in issues:
-                    if not self._store_issue(conn, issue_data):
+                    if not self.store_issue(conn, issue_data):
                         continue
                     total_issues += 1
                     self.stats["issues_fetched"] += 1
@@ -438,12 +319,13 @@ class SeeClickFixCrawler:
 
         console.print(f"\n[cyan]Fetching comments for {total} issues...[/cyan]")
 
+        crawl_start = time.time()
         for i, row in enumerate(issues):
             issue_id = row["id"]
-            comments = await self.fetch_comments(issue_id)
+            comments = await self.source.fetch_comments(issue_id)
 
             if comments:
-                count = self._store_comments(conn, issue_id, comments)
+                count = self.store_comments(conn, issue_id, comments)
                 self.stats["comments_fetched"] += count
 
             conn.execute(
@@ -453,9 +335,15 @@ class SeeClickFixCrawler:
             conn.commit()
 
             if (i + 1) % 10 == 0 or i == total - 1:
+                elapsed = time.time() - crawl_start
+                rate = (i + 1) / elapsed if elapsed > 0 else 0
+                remaining = (total - i - 1) / rate if rate > 0 else 0
+                mins, secs = divmod(int(remaining), 60)
+                hrs, mins = divmod(mins, 60)
                 console.print(
                     f"  Progress: {i + 1}/{total} issues, "
-                    f"{self.stats['comments_fetched']} comments"
+                    f"{self.stats['comments_fetched']} comments "
+                    f"({rate:.1f}/s, ETA {hrs}h{mins:02d}m{secs:02d}s)"
                 )
 
             if limit and (i + 1) >= limit:
